@@ -1,0 +1,17 @@
+# 环境变量
+.env
+.venv/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+    
+# 上传文件夹
+uploads/
+
+# 日志文件
+*.log
+
+# IDE
+.vscode/
+.idea/ 

@@ -1,0 +1,10 @@
+flask==2.3.3
+flask-cors==4.0.0
+pyshark==0.6.0
+requests==2.31.0
+python-dotenv==1.0.0
+werkzeug==2.3.7
+numpy==1.26.0
+pandas==2.1.1
+scapy==2.5.0
+deepseek-ai==0.1.0 

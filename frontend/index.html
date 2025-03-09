@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络包分析平台</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">网络包分析平台</h1>
+            <p class="text-gray-600">使用DeepSeek AI分析网络连接</p>
+        </header>
+
+        <!-- 过滤器设置 -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">分析过滤器</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">源IP地址</label>
+                    <input type="text" v-model="filters.src_ip" 
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="例如: 192.168.1.1">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">目标IP地址</label>
+                    <input type="text" v-model="filters.dst_ip"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="例如: 192.168.1.2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">协议类型（用逗号分隔）</label>
+                    <input type="text" v-model="filters.protocols"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="例如: TCP,UDP,HTTP">
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <div
+                @dragover.prevent
+                @drop.prevent="handleDrop"
+                class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center"
+                :class="{ 'border-blue-500': isDragging }"
+                @dragenter="isDragging = true"
+                @dragleave="isDragging = false"
+            >
+                <div v-if="!isUploading">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <p class="mt-4 text-gray-600">
+                        拖拽PCAP文件到此处或
+                        <label class="text-blue-500 hover:text-blue-600 cursor-pointer">
+                            <span>点击选择文件</span>
+                            <input type="file" class="hidden" @change="handleFileSelect" accept=".pcap,.pcapng,.cap">
+                        </label>
+                    </p>
+                    <p class="mt-2 text-sm text-gray-500">支持最大5GB的PCAP文件</p>
+                </div>
+                <div v-else class="space-y-4">
+                    <!-- 上传进度显示 -->
+                    <div class="flex flex-col items-center">
+                        <div class="w-full max-w-md bg-gray-200 rounded-full h-2.5 mb-2">
+                            <div class="bg-blue-500 h-2.5 rounded-full transition-all duration-300"
+                                 :style="{ width: uploadProgress + '%' }"></div>
+                        </div>
+                        <div class="text-sm text-gray-600">
+                            <span v-if="uploadProgress < 100">
+                                正在上传: {{ uploadProgress.toFixed(1) }}%
+                                <span class="text-xs text-gray-500">
+                                    ({{ formatBytes(uploadedBytes) }} / {{ formatBytes(totalBytes) }})
+                                </span>
+                            </span>
+                            <span v-else>
+                                文件上传完成，正在分析...
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <!-- 取消上传按钮 -->
+                    <div v-if="uploadProgress < 100">
+                        <button @click="cancelUpload" 
+                                class="text-red-600 hover:text-red-800 text-sm font-medium">
+                            取消上传
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-8">
+            <span class="block sm:inline">{{ error }}</span>
+        </div>
+
+        <div v-if="result" class="space-y-8">
+            <!-- 过滤器信息 -->
+            <div v-if="result.filters" class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">使用的过滤器</h2>
+                <div class="space-y-2">
+                    <p v-if="result.filters.src_ip" class="text-gray-700">源IP: {{ result.filters.src_ip }}</p>
+                    <p v-if="result.filters.dst_ip" class="text-gray-700">目标IP: {{ result.filters.dst_ip }}</p>
+                    <p v-if="result.filters.protocols" class="text-gray-700">协议: {{ result.filters.protocols.join(', ') }}</p>
+                </div>
+            </div>
+
+            <!-- 基础统计信息 -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">基础统计信息</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">总数据包数</p>
+                        <p class="text-2xl font-bold text-gray-800">{{ result.stats.total_packets }}</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">唯一源IP数</p>
+                        <p class="text-2xl font-bold text-gray-800">{{ result.stats.unique_src_ips }}</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">唯一目标IP数</p>
+                        <p class="text-2xl font-bold text-gray-800">{{ result.stats.unique_dst_ips }}</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">捕获持续时间</p>
+                        <p class="text-2xl font-bold text-gray-800">{{ formatDuration(result.stats.duration_seconds) }}</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">平均每秒数据包</p>
+                        <p class="text-2xl font-bold text-gray-800">{{ result.stats.packets_per_second.toFixed(2) }}</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">平均包大小</p>
+                        <p class="text-2xl font-bold text-gray-800">{{ formatBytes(result.stats.avg_packet_size) }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 协议分布 -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">协议分布</h2>
+                <div class="h-64">
+                    <canvas ref="protocolChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 最活跃IP -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">最活跃IP地址</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- 源IP -->
+                    <div>
+                        <h3 class="text-lg font-semibold mb-3">源IP TOP 10</h3>
+                        <div class="space-y-2">
+                            <div v-for="(count, ip) in result.stats.top_src_ips" :key="ip" class="flex justify-between items-center">
+                                <span class="text-gray-700">{{ ip }}</span>
+                                <span class="text-gray-600">{{ count }}次</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 目标IP -->
+                    <div>
+                        <h3 class="text-lg font-semibold mb-3">目标IP TOP 10</h3>
+                        <div class="space-y-2">
+                            <div v-for="(count, ip) in result.stats.top_dst_ips" :key="ip" class="flex justify-between items-center">
+                                <span class="text-gray-700">{{ ip }}</span>
+                                <span class="text-gray-600">{{ count }}次</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI 分析总结 -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">DeepSeek AI 分析报告</h2>
+                <div v-if="!result.summary" class="text-gray-600">
+                    正在等待 AI 分析结果...
+                </div>
+                <div v-else class="space-y-6">
+                    <!-- 网络流量模式 -->
+                    <div class="border-b pb-4">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-3">1. 网络流量模式和特征</h3>
+                        <div class="prose max-w-none text-gray-700" v-html="formatAnalysisSection(1)"></div>
+                    </div>
+                    
+                    <!-- 安全威胁 -->
+                    <div class="border-b pb-4">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-3">2. 潜在的安全威胁和异常行为</h3>
+                        <div class="prose max-w-none text-gray-700" v-html="formatAnalysisSection(2)"></div>
+                    </div>
+                    
+                    <!-- 可疑活动 -->
+                    <div class="border-b pb-4">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-3">3. 可疑的网络活动</h3>
+                        <div class="prose max-w-none text-gray-700" v-html="formatAnalysisSection(3)"></div>
+                    </div>
+                    
+                    <!-- 安全建议 -->
+                    <div>
+                        <h3 class="text-xl font-semibold text-gray-800 mb-3">4. 具体的安全建议和防护措施</h3>
+                        <div class="prose max-w-none text-gray-700" v-html="formatAnalysisSection(4)"></div>
+                    </div>
+
+                    <!-- 原始分析结果 -->
+                    <div class="mt-6 pt-4 border-t">
+                        <button @click="showRawAnalysis = !showRawAnalysis" 
+                                class="text-blue-600 hover:text-blue-800 font-medium">
+                            {{ showRawAnalysis ? '隐藏原始分析结果' : '显示原始分析结果' }}
+                        </button>
+                        <div v-if="showRawAnalysis" class="mt-4 p-4 bg-gray-50 rounded-lg">
+                            <pre class="whitespace-pre-wrap text-sm text-gray-700">{{ result.summary }}</pre>
+                        </div>
+                    </div>
+
+                    <!-- AI 对话框 -->
+                    <div class="mt-6 pt-4 border-t">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-3">与 AI 分析师对话</h3>
+                        <div class="space-y-4">
+                            <!-- 对话历史 -->
+                            <div class="space-y-4 max-h-96 overflow-y-auto p-4 bg-gray-50 rounded-lg">
+                                <div v-for="(message, index) in chatHistory" :key="index"
+                                     :class="{'text-right': message.role === 'user'}">
+                                    <div :class="[
+                                        'inline-block max-w-3xl rounded-lg p-3 text-sm',
+                                        message.role === 'user' 
+                                            ? 'bg-blue-500 text-white' 
+                                            : 'bg-white border border-gray-200'
+                                    ]">
+                                        <div class="whitespace-pre-wrap">{{ message.content }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 输入框和发送按钮 -->
+                            <div class="flex space-x-2">
+                                <textarea
+                                    v-model="currentMessage"
+                                    @keydown.enter.prevent="sendMessage"
+                                    class="flex-1 min-h-[80px] p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="输入你的问题..."
+                                ></textarea>
+                                <button
+                                    @click="sendMessage"
+                                    :disabled="isMessageSending || !currentMessage.trim()"
+                                    class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                >
+                                    <span v-if="!isMessageSending">发送</span>
+                                    <span v-else>发送中...</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 连接断联信息 -->
+            <div v-if="result.stats.connection_gaps && result.stats.connection_gaps.length > 0" class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">协议断联分析</h2>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full table-auto">
+                        <thead>
+                            <tr class="bg-gray-50">
+                                <th class="px-4 py-2 text-left">连接信息</th>
+                                <th class="px-4 py-2 text-left">协议</th>
+                                <th class="px-4 py-2 text-left">断联开始时间</th>
+                                <th class="px-4 py-2 text-left">断联结束时间</th>
+                                <th class="px-4 py-2 text-left">断联持续时间</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="gap in result.stats.connection_gaps" :key="gap.start_time" 
+                                class="border-b hover:bg-gray-50">
+                                <td class="px-4 py-2 font-mono text-sm">{{ formatConnectionInfo(gap.connection) }}</td>
+                                <td class="px-4 py-2">{{ gap.protocol }}</td>
+                                <td class="px-4 py-2">{{ formatDate(gap.start_time) }}</td>
+                                <td class="px-4 py-2">{{ formatDate(gap.end_time) }}</td>
+                                <td class="px-4 py-2">{{ formatDurationSeconds(gap.duration) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 连接列表 -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">网络连接列表</h2>
+                <p class="text-gray-600 mb-4">显示前{{ result.connections.length }}个连接样本</p>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full table-auto">
+                        <thead>
+                            <tr class="bg-gray-50">
+                                <th class="px-4 py-2 text-left">时间</th>
+                                <th class="px-4 py-2 text-left">源IP</th>
+                                <th class="px-4 py-2 text-left">源端口</th>
+                                <th class="px-4 py-2 text-left">目标IP</th>
+                                <th class="px-4 py-2 text-left">目标端口</th>
+                                <th class="px-4 py-2 text-left">协议</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="conn in result.connections" :key="conn.timestamp" class="border-b">
+                                <td class="px-4 py-2">{{ formatDate(conn.timestamp) }}</td>
+                                <td class="px-4 py-2">{{ conn.src_ip }}</td>
+                                <td class="px-4 py-2">{{ conn.src_port }}</td>
+                                <td class="px-4 py-2">{{ conn.dst_ip }}</td>
+                                <td class="px-4 py-2">{{ conn.dst_port }}</td>
+                                <td class="px-4 py-2">{{ conn.protocol }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue
+
+        createApp({
+            data() {
+                return {
+                    isDragging: false,
+                    isUploading: false,
+                    error: null,
+                    result: null,
+                    protocolChart: null,
+                    filters: {
+                        src_ip: '',
+                        dst_ip: '',
+                        protocols: ''
+                    },
+                    showRawAnalysis: false,
+                    chatHistory: [],
+                    currentMessage: '',
+                    isMessageSending: false,
+                    uploadProgress: 0,
+                    uploadedBytes: 0,
+                    totalBytes: 0,
+                    cancelTokenSource: null
+                }
+            },
+            computed: {
+                formattedSummary() {
+                    if (!this.result?.summary) return ''
+                    return this.result.summary.replace(/\n/g, '<br>')
+                }
+            },
+            methods: {
+                handleDrop(e) {
+                    this.isDragging = false
+                    const file = e.dataTransfer.files[0]
+                    this.uploadFile(file)
+                },
+                handleFileSelect(e) {
+                    const file = e.target.files[0]
+                    this.uploadFile(file)
+                },
+                cancelUpload() {
+                    if (this.cancelTokenSource) {
+                        this.cancelTokenSource.cancel('用户取消上传');
+                        this.resetUploadState();
+                    }
+                },
+                resetUploadState() {
+                    this.isUploading = false;
+                    this.uploadProgress = 0;
+                    this.uploadedBytes = 0;
+                    this.totalBytes = 0;
+                    this.cancelTokenSource = null;
+                },
+                async uploadFile(file) {
+                    if (!file) return;
+                    
+                    const allowedTypes = ['.pcap', '.pcapng', '.cap'];
+                    const fileExt = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+                    
+                    if (!allowedTypes.includes(fileExt)) {
+                        this.error = '不支持的文件类型。请上传PCAP文件。';
+                        return;
+                    }
+
+                    if (file.size > 5 * 1024 * 1024 * 1024) { // 5GB
+                        this.error = '文件大小超过5GB限制。';
+                        return;
+                    }
+
+                    this.isUploading = true;
+                    this.error = null;
+                    this.result = null;
+                    this.totalBytes = file.size;
+                    this.uploadedBytes = 0;
+                    this.uploadProgress = 0;
+
+                    this.cancelTokenSource = axios.CancelToken.source();
+
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    if (this.filters.src_ip) formData.append('src_ip', this.filters.src_ip);
+                    if (this.filters.dst_ip) formData.append('dst_ip', this.filters.dst_ip);
+                    if (this.filters.protocols) formData.append('protocols', this.filters.protocols);
+
+                    try {
+                        const response = await axios.post('http://localhost:5000/upload', formData, {
+                            headers: {
+                                'Content-Type': 'multipart/form-data'
+                            },
+                            cancelToken: this.cancelTokenSource.token,
+                            onUploadProgress: (progressEvent) => {
+                                this.uploadedBytes = progressEvent.loaded;
+                                this.uploadProgress = (progressEvent.loaded / progressEvent.total) * 100;
+                            }
+                        });
+                        
+                        this.result = response.data;
+                        this.$nextTick(() => {
+                            this.createProtocolChart();
+                        });
+                    } catch (err) {
+                        if (axios.isCancel(err)) {
+                            this.error = '上传已取消';
+                        } else {
+                            this.error = err.response?.data?.error || '上传文件时发生错误';
+                        }
+                    } finally {
+                        if (this.uploadProgress >= 100) {
+                            setTimeout(() => {
+                                this.resetUploadState();
+                            }, 1000);
+                        } else {
+                            this.resetUploadState();
+                        }
+                    }
+                },
+                formatDate(timestamp) {
+                    if (!timestamp) return 'N/A'
+                    return new Date(timestamp).toLocaleString()
+                },
+                formatDuration(seconds) {
+                    const hours = Math.floor(seconds / 3600)
+                    const minutes = Math.floor((seconds % 3600) / 60)
+                    const remainingSeconds = Math.floor(seconds % 60)
+                    return `${hours}时${minutes}分${remainingSeconds}秒`
+                },
+                formatBytes(bytes) {
+                    if (bytes < 1024) return bytes.toFixed(2) + ' B'
+                    else if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'
+                    else return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+                },
+                createProtocolChart() {
+                    if (this.protocolChart) {
+                        this.protocolChart.destroy()
+                    }
+
+                    const protocols = this.result.stats.protocols
+                    const ctx = this.$refs.protocolChart.getContext('2d')
+                    
+                    this.protocolChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: Object.keys(protocols),
+                            datasets: [{
+                                label: '数据包数量',
+                                data: Object.values(protocols),
+                                backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                                borderColor: 'rgb(59, 130, 246)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true
+                                }
+                            }
+                        }
+                    })
+                },
+                formatAnalysisSection(sectionNumber) {
+                    if (!this.result?.summary) return ''
+                    
+                    const sections = this.result.summary.split(/\d+\.\s+/).filter(Boolean)
+                    if (sectionNumber <= sections.length) {
+                        const section = sections[sectionNumber - 1]
+                        return section
+                            .replace(/\n/g, '<br>')
+                            .replace(/•\s+/g, '• ') // 保持项目符号的格式
+                            .replace(/(\d+\.\d+)\s+/g, '$1 ') // 保持子编号的格式
+                    }
+                    return '暂无分析结果'
+                },
+                formatConnectionInfo(connection) {
+                    const parts = connection.split(':')
+                    if (parts.length === 5) {
+                        // TCP/UDP connection with ports
+                        return `${parts[1]}:${parts[2]} → ${parts[3]}:${parts[4]}`
+                    } else if (parts.length === 3) {
+                        // Other protocols
+                        return `${parts[1]} → ${parts[2]}`
+                    }
+                    return connection
+                },
+                formatDurationSeconds(seconds) {
+                    const hours = Math.floor(seconds / 3600)
+                    const minutes = Math.floor((seconds % 3600) / 60)
+                    const remainingSeconds = Math.floor(seconds % 60)
+                    
+                    const parts = []
+                    if (hours > 0) parts.push(`${hours}小时`)
+                    if (minutes > 0) parts.push(`${minutes}分钟`)
+                    if (remainingSeconds > 0 || parts.length === 0) parts.push(`${remainingSeconds}秒`)
+                    
+                    return parts.join(' ')
+                },
+                async sendMessage() {
+                    if (!this.currentMessage.trim() || this.isMessageSending) return
+                    
+                    const message = this.currentMessage.trim()
+                    this.chatHistory.push({ role: 'user', content: message })
+                    this.currentMessage = ''
+                    this.isMessageSending = true
+                    
+                    try {
+                        const response = await axios.post('http://localhost:5000/chat', {
+                            message: message,
+                            context: {
+                                total_packets: this.result.stats.total_packets,
+                                unique_src_ips: this.result.stats.unique_src_ips,
+                                unique_dst_ips: this.result.stats.unique_dst_ips,
+                                unique_connections: this.result.stats.unique_connections,
+                                duration_seconds: this.result.stats.duration_seconds,
+                                protocols: this.result.stats.protocols
+                            }
+                        })
+                        
+                        if (response.data.success) {
+                            this.chatHistory.push({
+                                role: 'assistant',
+                                content: response.data.response
+                            })
+                        } else {
+                            this.chatHistory.push({
+                                role: 'assistant',
+                                content: '抱歉，处理您的问题时出现错误。'
+                            })
+                        }
+                    } catch (error) {
+                        this.chatHistory.push({
+                            role: 'assistant',
+                            content: '抱歉，发生了网络错误，请稍后重试。'
+                        })
+                    } finally {
+                        this.isMessageSending = false
+                        // 滚动到最新消息
+                        this.$nextTick(() => {
+                            const chatContainer = document.querySelector('.max-h-96')
+                            if (chatContainer) {
+                                chatContainer.scrollTop = chatContainer.scrollHeight
+                            }
+                        })
+                    }
+                }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html> 

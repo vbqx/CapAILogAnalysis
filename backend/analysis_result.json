@@ -1,0 +1,21 @@
+{
+  "stats": {
+    "total_packets": 38,
+    "unique_src_ips": 0,
+    "unique_dst_ips": 0,
+    "unique_connections": 0,
+    "protocols": {
+      "eth": 19
+    },
+    "duration_seconds": 0,
+    "avg_packet_size": 0.0,
+    "max_packet_size": 0.0,
+    "min_packet_size": 0.0,
+    "top_ports": {},
+    "top_src_ips": {},
+    "top_dst_ips": {},
+    "packets_per_second": 0,
+    "connection_gaps": []
+  },
+  "connections": []
+}
