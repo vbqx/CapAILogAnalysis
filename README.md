@@ -74,4 +74,4 @@ npm run serve
 
 - 处理大文件可能需要较长时间，请耐心等待
 - 确保您的DeepSeek API密钥有效且有足够的配额
-- 分析结果的准确性取决于DeepSeek模型的能力 
+- 分析结果的准确性取决于DeepSeek模型的能力
